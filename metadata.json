@@ -1,6 +1,6 @@
 {
   "name": "X Podrão",
-  "description": "Sistema de leitura de mangás com prioridade MangaFire, fallback inteligente entre fontes, sincronização em nuvem e leitura offline.",
+  "description": "Leitor e gerenciador de mangás com busca rápida MangaFire em duas etapas, autenticação e sincronização Cloud Firestore, favoritos, histórico e leitura offline.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

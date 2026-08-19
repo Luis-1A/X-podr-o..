@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { BookOpen, Sparkles, Check, ArrowRight, UserCheck, AlertCircle } from 'lucide-react';
+import { BookOpen, Sparkles, Check, ArrowRight, UserCheck, AlertCircle, LogIn } from 'lucide-react';
 
 const AVAILABLE_GENRES = [
   'Ação',
@@ -27,7 +27,7 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
-  const { login, register, guestLogin } = useAuth();
+  const { login, register, loginWithGoogle, guestLogin } = useAuth();
   const [tab, setTab] = useState<'login' | 'register'>('login');
   const [step, setStep] = useState<'form' | 'preferences'>('form');
 
@@ -56,20 +56,40 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     );
   };
 
+  const parseFirebaseError = (err: any): string => {
+    const code = err?.code || '';
+    if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+      return 'E-mail ou senha incorretos.';
+    }
+    if (code === 'auth/email-already-in-use') {
+      return 'Este e-mail já está cadastrado. Tente entrar.';
+    }
+    if (code === 'auth/invalid-email') {
+      return 'Endereço de e-mail inválido.';
+    }
+    if (code === 'auth/weak-password') {
+      return 'A senha é muito fraca (mínimo 6 caracteres).';
+    }
+    if (code === 'auth/popup-closed-by-user') {
+      return 'O login com Google foi cancelado.';
+    }
+    return err?.message || 'Não foi possível conectar ao Firebase. Verifique seus dados.';
+  };
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!username.trim() || !password.trim()) {
+    if (!email.trim() || !password.trim()) {
       setError('Por favor, preencha todos os campos.');
       return;
     }
 
     setLoading(true);
     try {
-      await login(username.trim(), password);
+      await login(email.trim(), password);
       if (onClose) onClose();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Erro ao entrar. Verifique seus dados.');
+      setError(parseFirebaseError(err));
     } finally {
       setLoading(false);
     }
@@ -115,8 +135,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       await register(username.trim(), email.trim(), password, selectedGenres, selectedLangs);
       if (onClose) onClose();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Erro ao criar conta.');
+      setError(parseFirebaseError(err));
       setStep('form');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      await loginWithGoogle();
+      if (onClose) onClose();
+    } catch (err: any) {
+      setError(parseFirebaseError(err));
     } finally {
       setLoading(false);
     }
@@ -129,7 +162,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       await guestLogin();
       if (onClose) onClose();
     } catch (err: any) {
-      setError('Erro ao iniciar como visitante.');
+      if (onClose) onClose();
     } finally {
       setLoading(false);
     }
@@ -148,10 +181,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               <span className="text-red-500">X</span>
               <span className="text-amber-400">Podrão</span>
               <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 font-medium border border-red-500/30">
-                v2.0
+                MangaFire
               </span>
             </h2>
-            <p className="text-xs text-neutral-400">Leitor e biblioteca de mangás com prioridade MangaFire</p>
+            <p className="text-xs text-neutral-400">Autenticação Firebase & Leitor Integrado</p>
           </div>
         </div>
 
@@ -196,15 +229,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               <form onSubmit={handleLoginSubmit} className="space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-neutral-300 mb-1.5">
-                    Nome de usuário ou E-mail
+                    E-mail
                   </label>
                   <input
-                    id="login-username-input"
-                    type="text"
+                    id="login-email-input"
+                    type="email"
                     required
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Seu usuário ou e-mail"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="seu.email@exemplo.com"
                     className="w-full px-4 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 text-sm transition"
                   />
                 </div>
@@ -230,7 +263,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   disabled={loading}
                   className="w-full mt-2 py-3 bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-medium rounded-xl text-sm transition shadow-lg shadow-rose-900/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
-                  {loading ? 'Entrando...' : 'Entrar na Conta'}
+                  <LogIn className="w-4 h-4" />
+                  {loading ? 'Validando Firebase...' : 'Entrar com E-mail'}
                 </button>
               </form>
             ) : (
@@ -245,7 +279,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     required
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="ex: anime_reader"
+                    placeholder="ex: LeitorManga"
                     className="w-full px-4 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 text-sm transition"
                   />
                 </div>
@@ -306,16 +340,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               </form>
             )}
 
-            <div className="mt-6 pt-5 border-t border-neutral-800/80 text-center">
+            <div className="mt-6 pt-5 border-t border-neutral-800/80 space-y-2.5">
+              <button
+                id="google-login-btn"
+                type="button"
+                onClick={handleGoogleLogin}
+                disabled={loading}
+                className="w-full py-2.5 px-4 bg-neutral-800/80 hover:bg-neutral-800 text-white rounded-xl text-xs font-medium border border-neutral-700/60 transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24">
+                  <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.8 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.4l3.7 2.9C6.5 7.4 9 5 12 5z" />
+                  <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z" />
+                  <path fill="#FBBC05" d="M5.6 14.7c-.2-.7-.4-1.4-.4-2.2s.2-1.5.4-2.2L1.9 7.4C.7 9.8 0 12.4 0 15.2s.7 5.4 1.9 7.8l3.7-2.9z" />
+                  <path fill="#34A853" d="M12 23.5c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2-6.4-4.8L1.9 16.9C3.7 20.7 7.5 23.5 12 23.5z" />
+                </svg>
+                Continuar com Google
+              </button>
+
               <button
                 id="continue-as-guest-btn"
                 type="button"
                 onClick={handleGuest}
                 disabled={loading}
-                className="w-full py-2.5 px-4 bg-neutral-800/60 hover:bg-neutral-800 text-neutral-300 hover:text-white rounded-xl text-xs font-medium border border-neutral-700/60 transition flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-2.5 px-4 bg-neutral-900 hover:bg-neutral-800/60 text-neutral-300 hover:text-white rounded-xl text-xs font-medium border border-neutral-800 transition flex items-center justify-center gap-2 cursor-pointer"
               >
                 <UserCheck className="w-4 h-4 text-neutral-400" />
-                Continuar sem conta (Modo Visitante)
+                Modo Visitante (Offline ou Sem Conta)
               </button>
             </div>
           </>
@@ -328,14 +378,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               </div>
               <h3 className="text-base font-bold text-white">Quais gêneros você prefere?</h3>
               <p className="text-xs text-neutral-400 mt-1">
-                Usaremos suas escolhas reais para organizar recomendações e descobertas.
+                Usaremos suas preferências no Firestore para personalizar seu catálogo MangaFire.
               </p>
             </div>
 
             {/* Languages */}
             <div>
               <label className="block text-xs font-medium text-neutral-300 mb-2">
-                Idiomas preferidos para tradução:
+                Idiomas preferidos:
               </label>
               <div className="flex flex-wrap gap-2">
                 {[
@@ -365,7 +415,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             {/* Genres */}
             <div>
               <label className="block text-xs font-medium text-neutral-300 mb-2">
-                Gêneros favoritos (opcional):
+                Gêneros favoritos:
               </label>
               <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto pr-1">
                 {AVAILABLE_GENRES.map((g) => {
@@ -404,7 +454,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 disabled={loading}
                 className="flex-1 py-2.5 px-4 bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-medium rounded-xl text-xs transition shadow-lg shadow-rose-900/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                {loading ? 'Criando sua conta...' : 'Concluir e Abrir MangaVerse'}
+                {loading ? 'Criando conta no Firebase...' : 'Concluir Cadastro'}
               </button>
             </div>
           </div>

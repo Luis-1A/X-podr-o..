@@ -166,6 +166,20 @@ export interface ChapterPagesResult {
   total: number;
 }
 
+export interface MangaSearchPreview {
+  id: string;
+  title: string;
+  coverUrl: string;
+  description: string;
+  source: string;
+  sourceId: string;
+  totalChapters?: number;
+  type?: string;
+  status?: string;
+  genres?: string[];
+  isComplete?: boolean;
+}
+
 export interface ExtensionItem {
   id: string;
   name: string;

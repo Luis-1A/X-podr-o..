@@ -1,25 +1,42 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { DownloadProvider } from './context/DownloadContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
 import { LibraryView } from './components/LibraryView';
 import { DiscoverView } from './components/DiscoverView';
-import { DownloadsView } from './components/DownloadsView';
-import { UpdatesView } from './components/UpdatesView';
 import { HistoryView } from './components/HistoryView';
 import { SettingsView } from './components/SettingsView';
 import { MangaDetailModal } from './components/MangaDetailModal';
 import { ReaderView } from './components/ReaderView';
 import { AuthModal } from './components/AuthModal';
-import { ChapterItem, MangaItem, ReadingProgress } from './types';
-import { apiGetMangaChapters, apiGetMangaDetails } from './services/api';
+import { ChapterItem, MangaItem } from './types';
+import { apiGetMangaChapters } from './services/api';
 
 function MainApp() {
   const { user, isLoading } = useAuth();
 
-  const [currentTab, setCurrentTab] = useState<string>('library');
+  const [currentTab, setCurrentTab] = useState<string>('discover');
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
+
+  // Global window error listener to prevent silent app crashes
+  useEffect(() => {
+    const handleGlobalError = (event: ErrorEvent) => {
+      console.warn('[X Podrão Runtime Error caught]:', event.message, event.error);
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      console.warn('[X Podrão Unhandled Promise Rejection]:', event.reason);
+    };
+
+    window.addEventListener('error', handleGlobalError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener('error', handleGlobalError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, []);
 
   // Selected Manga Modal
   const [selectedMangaId, setSelectedMangaId] = useState<string | null>(null);
@@ -33,13 +50,6 @@ function MainApp() {
     initialPage?: number;
   } | null>(null);
 
-  // Check if initial authentication welcome modal should open
-  useEffect(() => {
-    if (!isLoading && !user) {
-      setAuthModalOpen(true);
-    }
-  }, [isLoading, user]);
-
   const handleSelectManga = (mangaId: string, mangaData?: MangaItem) => {
     setSelectedMangaId(mangaId);
     setSelectedMangaData(mangaData);
@@ -50,7 +60,6 @@ function MainApp() {
     manga: MangaItem,
     initialPage: number = 1
   ) => {
-    // If we don't have all chapters, attempt to load them for prev/next buttons
     let allChapters: ChapterItem[] = [];
     try {
       allChapters = await apiGetMangaChapters(manga.id);
@@ -66,36 +75,8 @@ function MainApp() {
     });
   };
 
-  const handleResumeReading = async (prog: ReadingProgress) => {
-    try {
-      const manga = await apiGetMangaDetails(prog.mangaId);
-      const allChapters = await apiGetMangaChapters(prog.mangaId);
-      const targetChapter = allChapters.find((c) => c.id === prog.chapterId) || {
-        id: prog.chapterId,
-        mangaId: prog.mangaId,
-        volume: null,
-        chapter: prog.chapterNumber,
-        title: prog.chapterTitle || null,
-        language: 'pt-br',
-        publishAt: prog.updatedAt,
-        pages: prog.totalPages,
-      };
-
-      if (manga) {
-        setActiveReader({
-          chapter: targetChapter,
-          manga,
-          allChapters,
-          initialPage: prog.currentPage,
-        });
-      }
-    } catch (err) {
-      console.error('Error resuming reading:', err);
-    }
-  };
-
   return (
-    <div id="xpodrao-app-root" className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-red-600 selection:text-white">
+    <div id="xpodrao-app-root" className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-rose-600 selection:text-white">
       {/* Header */}
       <Header
         onOpenAuth={() => setAuthModalOpen(true)}
@@ -103,39 +84,32 @@ function MainApp() {
         currentTab={currentTab}
       />
 
-      {/* Top Desktop Navigation */}
+      {/* Top Desktop & Mobile Navigation */}
       <Navigation
         currentTab={currentTab}
         onNavigate={(tab) => setCurrentTab(tab)}
       />
 
-      {/* Main Content Area */}
-      <main className="flex-1">
-        {currentTab === 'library' && (
-          <LibraryView
-            onSelectManga={handleSelectManga}
-            onResumeReading={handleResumeReading}
-            onNavigateToDiscover={() => setCurrentTab('discover')}
-          />
-        )}
+      {/* Main Content Area with Error Boundary per view */}
+      <main className="flex-1 p-4 sm:p-6">
+        <ErrorBoundary fallbackTitle="Falha ao carregar conteúdo da aba">
+          {currentTab === 'discover' && (
+            <DiscoverView onSelectManga={handleSelectManga} />
+          )}
 
-        {currentTab === 'discover' && (
-          <DiscoverView onSelectManga={handleSelectManga} />
-        )}
+          {currentTab === 'library' && (
+            <LibraryView
+              onSelectManga={handleSelectManga}
+              onNavigateToDiscover={() => setCurrentTab('discover')}
+            />
+          )}
 
-        {currentTab === 'downloads' && (
-          <DownloadsView onStartReading={handleStartReading} />
-        )}
+          {currentTab === 'history' && (
+            <HistoryView onStartReading={handleStartReading} />
+          )}
 
-        {currentTab === 'updates' && (
-          <UpdatesView onSelectManga={(id) => handleSelectManga(id)} />
-        )}
-
-        {currentTab === 'history' && (
-          <HistoryView onStartReading={handleStartReading} />
-        )}
-
-        {currentTab === 'settings' && <SettingsView />}
+          {currentTab === 'settings' && <SettingsView />}
+        </ErrorBoundary>
       </main>
 
       {/* Manga Detail Modal */}
@@ -180,10 +154,10 @@ function MainApp() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <DownloadProvider>
+    <ErrorBoundary>
+      <AuthProvider>
         <MainApp />
-      </DownloadProvider>
-    </AuthProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

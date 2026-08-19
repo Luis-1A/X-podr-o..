@@ -1,16 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useDownloads } from '../context/DownloadContext';
 import {
-  BookOpen,
-  Wifi,
-  WifiOff,
-  RefreshCw,
-  Download,
+  Flame,
   User as UserIcon,
   LogOut,
-  Sliders,
-  CheckCircle2,
+  Sparkles,
+  LogIn,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -20,31 +15,8 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onOpenAuth, onNavigate }) => {
-  const { user, isOnline, manualOffline, setManualOffline, logout, syncPendingData } = useAuth();
-  const { isDownloading, queue, storageStats } = useDownloads();
-
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const { user, logout } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
-
-  const handleSyncClick = async () => {
-    if (!isOnline) return;
-    setIsSyncing(true);
-    try {
-      const count = await syncPendingData();
-      setSyncMessage(count > 0 ? `${count} itens sincronizados` : 'Tudo atualizado');
-      setTimeout(() => setSyncMessage(null), 3000);
-    } catch (e) {
-      setSyncMessage('Erro na sincronização');
-      setTimeout(() => setSyncMessage(null), 3000);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const toggleOfflineMode = () => {
-    setManualOffline(!manualOffline);
-  };
 
   return (
     <header id="main-header" className="sticky top-0 z-40 bg-neutral-950/90 backdrop-blur-md border-b border-neutral-800/80 px-4 sm:px-6 py-3">
@@ -53,147 +25,87 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAuth, onNavigate }) => {
         <button
           id="logo-home-btn"
           type="button"
-          onClick={() => onNavigate('library')}
+          onClick={() => onNavigate('discover')}
           className="flex items-center space-x-2.5 cursor-pointer text-left group"
         >
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-red-600 via-rose-600 to-amber-500 flex items-center justify-center shadow-md shadow-red-950/50 group-hover:scale-105 transition-transform">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-rose-600 via-red-600 to-amber-500 flex items-center justify-center shadow-md shadow-rose-950/50 group-hover:scale-105 transition-transform">
             <span className="text-white font-black text-sm tracking-wider">X</span>
           </div>
           <div>
             <h1 className="text-base font-extrabold tracking-tight flex items-center gap-1 leading-none">
-              <span className="text-red-500 text-lg">X</span>
+              <span className="text-rose-500 text-lg">X</span>
               <span className="text-amber-400 text-base">Podrão</span>
+              <span className="ml-1 px-1.5 py-0.5 rounded-md bg-rose-500/20 text-rose-400 text-[10px] font-bold border border-rose-500/30">
+                MangaFire
+              </span>
             </h1>
             <span className="text-[10px] text-neutral-400 font-medium tracking-wide">
-              READER & LIBRARY
+              LEITOR RÁPIDO & FIRESTORE
             </span>
           </div>
         </button>
 
-        {/* Center/Right Actions: Online/Offline Switch, Sync, Downloads, Profile */}
+        {/* Right User Actions */}
         <div className="flex items-center space-x-2 sm:space-x-3">
-          {/* Online / Offline Switch Indicator */}
-          <button
-            id="network-mode-toggle-btn"
-            type="button"
-            onClick={toggleOfflineMode}
-            title={isOnline ? 'Online (Clique para alternar para modo offline)' : 'Modo Offline (Clique para alternar para online)'}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold border transition cursor-pointer ${
-              isOnline
-                ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400 hover:bg-emerald-900/40'
-                : 'bg-amber-950/60 border-amber-800 text-amber-300 hover:bg-amber-900/60'
-            }`}
-          >
-            {isOnline ? (
-              <>
-                <Wifi className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline">Online</span>
-              </>
-            ) : (
-              <>
-                <WifiOff className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                <span>Offline</span>
-              </>
-            )}
-          </button>
-
-          {/* Sync Button */}
-          {isOnline && (
-            <button
-              id="sync-now-btn"
-              type="button"
-              onClick={handleSyncClick}
-              disabled={isSyncing}
-              title="Sincronizar progresso e biblioteca com a nuvem"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 transition cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 text-neutral-400 ${isSyncing ? 'animate-spin text-rose-400' : ''}`} />
-              <span className="hidden md:inline">
-                {syncMessage || (isSyncing ? 'Sincronizando...' : 'Sincronizar')}
-              </span>
-            </button>
-          )}
-
-          {/* Active Downloads Indicator */}
-          <button
-            id="header-downloads-btn"
-            type="button"
-            onClick={() => onNavigate('downloads')}
-            title="Gerenciador de downloads"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 transition cursor-pointer relative"
-          >
-            <Download className={`w-3.5 h-3.5 ${isDownloading ? 'text-rose-400 animate-bounce' : 'text-neutral-400'}`} />
-            <span className="hidden md:inline">Downloads</span>
-            {queue.length > 0 && (
-              <span className="px-1.5 py-0.2 bg-rose-600 text-white rounded-full text-[10px] font-bold">
-                {queue.length}
-              </span>
-            )}
-            {queue.length === 0 && storageStats.chapterCount > 0 && (
-              <span className="text-[10px] text-neutral-400 hidden sm:inline">
-                ({storageStats.chapterCount})
-              </span>
-            )}
-          </button>
-
-          {/* User Account / Profile */}
           {user ? (
             <div className="relative">
               <button
                 id="user-profile-menu-btn"
                 type="button"
                 onClick={() => setShowUserMenu(!showUserMenu)}
-                className="flex items-center gap-2 py-1 px-2.5 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-neutral-700 transition cursor-pointer"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-xs font-semibold text-neutral-200 transition cursor-pointer"
               >
-                <div className="w-6 h-6 rounded-full bg-rose-900/60 border border-rose-600/40 text-rose-200 flex items-center justify-center text-xs font-bold">
+                <div className="w-5 h-5 rounded-full bg-rose-600/30 border border-rose-500/50 flex items-center justify-center text-rose-400 font-bold text-[10px]">
                   {user.username.charAt(0).toUpperCase()}
                 </div>
-                <span className="text-xs font-medium text-neutral-200 max-w-[100px] truncate hidden sm:inline">
-                  {user.username}
-                </span>
+                <span className="max-w-[100px] truncate hidden sm:inline">{user.username}</span>
               </button>
 
-              {/* Dropdown */}
               {showUserMenu && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowUserMenu(false)}
-                  />
-                  <div
-                    id="user-dropdown-menu"
-                    className="absolute right-0 mt-2 w-48 bg-neutral-900 border border-neutral-800 rounded-xl shadow-xl py-1.5 z-50 text-xs"
-                  >
-                    <div className="px-3 py-2 border-b border-neutral-800">
-                      <p className="font-semibold text-white truncate">{user.username}</p>
-                      <p className="text-[10px] text-neutral-400 truncate">{user.email}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => { setShowUserMenu(false); onNavigate('settings'); }}
-                      className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 flex items-center gap-2 cursor-pointer"
-                    >
-                      <Sliders className="w-3.5 h-3.5" /> Configurações & Preferências
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setShowUserMenu(false); logout(); }}
-                      className="w-full text-left px-3 py-2 text-rose-400 hover:bg-rose-950/40 flex items-center gap-2 cursor-pointer border-t border-neutral-800/60"
-                    >
-                      <LogOut className="w-3.5 h-3.5" /> Sair da conta
-                    </button>
+                <div
+                  id="user-dropdown-menu"
+                  className="absolute right-0 mt-2 w-48 bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl p-1.5 z-50 text-xs animate-in fade-in zoom-in-95 duration-100"
+                >
+                  <div className="px-3 py-2 border-b border-neutral-800 text-neutral-400">
+                    <p className="font-bold text-white truncate">{user.username}</p>
+                    <p className="text-[10px] text-neutral-500 truncate">{user.email}</p>
                   </div>
-                </>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowUserMenu(false);
+                      onNavigate('settings');
+                    }}
+                    className="w-full px-3 py-2 text-left text-neutral-300 hover:text-white hover:bg-neutral-800 rounded-xl transition flex items-center gap-2 cursor-pointer mt-1"
+                  >
+                    <UserIcon className="w-3.5 h-3.5 text-rose-400" />
+                    Preferências
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowUserMenu(false);
+                      logout();
+                    }}
+                    className="w-full px-3 py-2 text-left text-rose-400 hover:bg-rose-950/40 rounded-xl transition flex items-center gap-2 cursor-pointer mt-0.5"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    Sair
+                  </button>
+                </div>
               )}
             </div>
           ) : (
             <button
-              id="header-open-auth-btn"
+              id="header-login-btn"
               type="button"
               onClick={onOpenAuth}
-              className="py-1.5 px-3 bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white rounded-lg text-xs font-medium transition cursor-pointer shadow-sm"
+              className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white text-xs font-semibold shadow-md shadow-rose-950/40 transition flex items-center gap-1.5 cursor-pointer"
             >
-              Entrar / Criar Conta
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Entrar / Cadastrar</span>
             </button>
           )}
         </div>

@@ -1,0 +1,94 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened Helper Functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.:]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // User Profile Rules
+    match /users/{uid} {
+      allow get: if isOwner(uid);
+      allow create: if isOwner(uid)
+        && incoming().keys().hasAll(['name', 'email', 'createdAt'])
+        && incoming().name is string && incoming().name.size() <= 100
+        && incoming().email is string && incoming().email.size() <= 200
+        && (!('role' in incoming()) || incoming().role == 'user');
+      allow update: if isOwner(uid)
+        && (!('role' in incoming()) || incoming().role == existing().role);
+      allow delete: if false;
+
+      // User Favorites Subcollection
+      match /favorites/{mangaId} {
+        allow get, list: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && incoming().mangaId is string && incoming().mangaId.size() <= 128
+          && incoming().title is string && incoming().title.size() <= 300;
+        allow delete: if isOwner(uid);
+      }
+
+      // User History Subcollection
+      match /history/{historyId} {
+        allow get, list: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && incoming().mangaId is string && incoming().mangaId.size() <= 128
+          && incoming().chapterId is string && incoming().chapterId.size() <= 128;
+        allow delete: if isOwner(uid);
+      }
+
+      // User Reading Progress Subcollection
+      match /progress/{mangaId} {
+        allow get, list: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && incoming().mangaId is string && incoming().mangaId.size() <= 128
+          && incoming().chapterId is string && incoming().chapterId.size() <= 128
+          && incoming().progress is number;
+        allow delete: if isOwner(uid);
+      }
+
+      // User Settings Subcollection
+      match /settings/{settingDoc} {
+        allow get, list: if isOwner(uid);
+        allow create, update: if isOwner(uid);
+        allow delete: if isOwner(uid);
+      }
+    }
+
+    // Global Manga & Chapters Cache
+    match /mangas/{mangaId} {
+      allow get, list: if true;
+      allow create, update: if isSignedIn()
+        && incoming().title is string && incoming().title.size() <= 300;
+      allow delete: if false;
+
+      match /chapters/{chapterId} {
+        allow get, list: if true;
+        allow create, update: if isSignedIn()
+          && incoming().chapterNumber is string && incoming().chapterNumber.size() <= 50;
+        allow delete: if false;
+      }
+    }
+  }
+}

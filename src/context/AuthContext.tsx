@@ -1,6 +1,16 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, UserProfile, UserSettings } from '../types';
-import { apiGetMe, apiLogin, apiRegister, apiGuest, apiUpdatePreferences, apiUpdateSettings, syncOfflineProgressQueue } from '../services/api';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../services/firebase';
+import {
+  firebaseLoginUser,
+  firebaseRegisterUser,
+  firebaseGoogleSignIn,
+  firebaseGuestSignIn,
+  firebaseSignOutUser,
+  apiUpdateSettings,
+} from '../services/api';
 
 interface AuthContextType {
   user: User | null;
@@ -10,13 +20,13 @@ interface AuthContextType {
   isOnline: boolean;
   manualOffline: boolean;
   setManualOffline: (val: boolean) => void;
-  login: (login: string, pass: string) => Promise<void>;
+  login: (email: string, pass: string) => Promise<void>;
   register: (username: string, email: string, pass: string, genres?: string[], langs?: string[]) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
   guestLogin: () => Promise<void>;
   logout: () => void;
   updatePreferences: (genres: string[], langs: string[]) => Promise<void>;
   updateSettings: (newSettings: Partial<UserSettings>) => Promise<void>;
-  syncPendingData: () => Promise<number>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -24,26 +34,22 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [settings, setSettings] = useState<UserSettings | null>({
+    reader_mode: 'webtoon',
+    reading_direction: 'ltr',
+    page_fit: 'width',
+    auto_download_next: 1,
+    keep_downloads: 5,
+    theme: 'dark',
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [manualOffline, setManualOffline] = useState<boolean>(false);
 
   // Network state listeners
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      // Auto-sync offline reading progress when network returns
-      syncOfflineProgressQueue().then((count) => {
-        if (count > 0) {
-          console.log(`[X Podrão] Sincronizados ${count} registros de progresso salvos offline.`);
-        }
-      });
-    };
-
-    const handleOffline = () => {
-      setIsOnline(false);
-    };
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -54,95 +60,116 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, []);
 
-  // Initial session check
+  // Firebase Auth State Listener
   useEffect(() => {
-    async function loadUser() {
-      const token = localStorage.getItem('xpodrao_auth_token') || localStorage.getItem('mangaverse_auth_token');
-      if (!token) {
-        setIsLoading(false);
-        return;
-      }
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser: FirebaseUser | null) => {
+      if (fbUser) {
+        let username = fbUser.displayName || fbUser.email?.split('@')[0] || 'Leitor';
+        let genres: string[] = [];
+        let langs: string[] = ['pt-br', 'en'];
 
-      try {
-        const data = await apiGetMe();
-        if (data && data.user) {
-          setUser(data.user);
-          setProfile(data.profile);
-          setSettings(data.settings);
+        try {
+          // Fetch user profile doc
+          const userDoc = await getDoc(doc(db, 'users', fbUser.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            if (data.name) username = data.name;
+          }
+
+          // Fetch preferences doc
+          const prefDoc = await getDoc(doc(db, 'users', fbUser.uid, 'settings', 'preferences'));
+          if (prefDoc.exists()) {
+            const p = prefDoc.data();
+            setSettings((prev) => ({ ...prev!, ...p }));
+            if (p.preferredGenres) genres = p.preferredGenres;
+            if (p.preferredLanguages) langs = p.preferredLanguages;
+          }
+        } catch (e) {
+          console.warn('Could not fetch user settings from Firestore (offline or initial):', e);
         }
-      } catch (err) {
-        console.warn('Session verification failed, logging out or offline mode:', err);
-        // If offline, preserve cached user
-        const cachedUser = localStorage.getItem('xpodrao_cached_user') || localStorage.getItem('mangaverse_cached_user');
-        if (cachedUser) {
+
+        const activeUser: User = {
+          id: fbUser.uid,
+          username,
+          email: fbUser.email || 'visitante@xpodrao.local',
+          isGuest: fbUser.isAnonymous,
+        };
+
+        setUser(activeUser);
+        setProfile({
+          displayName: username,
+          preferredGenres: genres,
+          preferredLanguages: langs,
+        });
+        localStorage.setItem('xpodrao_cached_user', JSON.stringify(activeUser));
+      } else {
+        // Check for cached local guest
+        const cached = localStorage.getItem('xpodrao_cached_user');
+        if (cached) {
           try {
-            setUser(JSON.parse(cachedUser));
-          } catch (e) {}
+            const parsed = JSON.parse(cached);
+            setUser(parsed);
+            setProfile({
+              displayName: parsed.username,
+              preferredGenres: [],
+              preferredLanguages: ['pt-br', 'en'],
+            });
+          } catch (e) {
+            setUser(null);
+          }
+        } else {
+          setUser(null);
         }
-      } finally {
-        setIsLoading(false);
       }
-    }
+      setIsLoading(false);
+    });
 
-    loadUser();
+    return () => unsubscribe();
   }, []);
 
-  const login = async (loginId: string, pass: string) => {
-    const res = await apiLogin(loginId, pass);
+  const login = async (email: string, pass: string) => {
+    const res = await firebaseLoginUser(email, pass);
     setUser(res.user);
     setProfile(res.profile);
-    localStorage.setItem('xpodrao_cached_user', JSON.stringify(res.user));
-    await syncPendingData();
+    if (res.settings) setSettings(res.settings);
   };
 
   const register = async (username: string, email: string, pass: string, genres?: string[], langs?: string[]) => {
-    const res = await apiRegister({
-      username,
-      email,
-      password: pass,
-      preferredGenres: genres,
-      preferredLanguages: langs,
-    });
+    const res = await firebaseRegisterUser(email, pass, username, genres, langs);
     setUser(res.user);
     setProfile(res.profile);
-    localStorage.setItem('xpodrao_cached_user', JSON.stringify(res.user));
+    if (res.settings) setSettings(res.settings);
+  };
+
+  const loginWithGoogle = async () => {
+    const res = await firebaseGoogleSignIn();
+    setUser(res.user);
+    setProfile(res.profile);
+    if (res.settings) setSettings(res.settings);
   };
 
   const guestLogin = async () => {
-    const res = await apiGuest();
+    const res = await firebaseGuestSignIn();
     setUser(res.user);
     setProfile(res.profile);
-    localStorage.setItem('xpodrao_cached_user', JSON.stringify(res.user));
+    if (res.settings) setSettings(res.settings);
   };
 
-  const logout = () => {
-    localStorage.removeItem('xpodrao_auth_token');
-    localStorage.removeItem('mangaverse_auth_token');
-    localStorage.removeItem('xpodrao_cached_user');
-    localStorage.removeItem('mangaverse_cached_user');
+  const logout = async () => {
+    await firebaseSignOutUser();
     setUser(null);
     setProfile(null);
-    setSettings(null);
   };
 
   const updatePreferences = async (genres: string[], langs: string[]) => {
-    await apiUpdatePreferences({ preferredGenres: genres, preferredLanguages: langs });
-    setProfile((prev) => prev ? { ...prev, preferredGenres: genres, preferredLanguages: langs } : null);
+    setProfile((prev) => (prev ? { ...prev, preferredGenres: genres, preferredLanguages: langs } : null));
+    await apiUpdateSettings({ preferredGenres: genres, preferredLanguages: langs });
   };
 
   const updateSettings = async (newSettings: Partial<UserSettings>) => {
+    setSettings((prev) => (prev ? { ...prev, ...newSettings } : null));
     await apiUpdateSettings(newSettings);
-    setSettings((prev) => prev ? { ...prev, ...newSettings } : null);
   };
-
-  const syncPendingData = async (): Promise<number> => {
-    if (effectiveOnline) {
-      return await syncOfflineProgressQueue();
-    }
-    return 0;
-  };
-
-  const effectiveOnline = isOnline && !manualOffline;
 
   return (
     <AuthContext.Provider
@@ -151,16 +178,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         profile,
         settings,
         isLoading,
-        isOnline: effectiveOnline,
+        isOnline,
         manualOffline,
         setManualOffline,
         login,
         register,
+        loginWithGoogle,
         guestLogin,
         logout,
         updatePreferences,
         updateSettings,
-        syncPendingData,
       }}
     >
       {children}
@@ -168,10 +195,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   );
 };
 
-export function useAuth() {
+export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}
+};

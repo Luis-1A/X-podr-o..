@@ -1,372 +1,392 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { MangaItem } from '../types';
+import { MangaItem, MangaSearchPreview } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { apiSearchManga, apiGetRecommendations, getProxiedImageUrl } from '../services/api';
-import { Search, Sparkles, Filter, BookOpen, AlertCircle, RefreshCw } from 'lucide-react';
-
-const GENRES_LIST = [
-  'Action',
-  'Adventure',
-  'Romance',
-  'Fantasy',
-  'Comedy',
-  'Drama',
-  'Mystery',
-  'Horror',
-  'Sci-Fi',
-  'Sports',
-  'Slice of Life',
-  'Supernatural',
-  'Isekai',
-  'Psychological',
-];
+import { apiSearchManga, apiGetDiscover, getProxiedImageUrl } from '../services/api';
+import { Search, Sparkles, AlertCircle, RefreshCw, BookOpen, Layers, Flame, CheckCircle2 } from 'lucide-react';
 
 interface DiscoverViewProps {
   onSelectManga: (mangaId: string, mangaData?: MangaItem) => void;
 }
 
 export const DiscoverView: React.FC<DiscoverViewProps> = ({ onSelectManga }) => {
-  const { profile, isOnline } = useAuth();
+  const { isOnline } = useAuth();
 
   const [query, setQuery] = useState('');
-  const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
-  const [selectedLang, setSelectedLang] = useState<string>('pt-br');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [results, setResults] = useState<MangaSearchPreview[]>([]);
+  const [popular, setPopular] = useState<MangaItem[]>([]);
+  const [latest, setLatest] = useState<MangaItem[]>([]);
 
-  const [results, setResults] = useState<MangaItem[]>([]);
-  const [totalCount, setTotalCount] = useState<number>(0);
-  const [recommendations, setRecommendations] = useState<MangaItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [searched, setSearched] = useState<boolean>(false);
+  // 4 States: 'IDLE' | 'LOADING' | 'SUCCESS' | 'EMPTY' | 'ERROR'
+  const [searchState, setSearchState] = useState<'IDLE' | 'LOADING' | 'SUCCESS' | 'EMPTY' | 'ERROR'>('IDLE');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Initial load: fetch recommendations or trending titles
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Debounce input effect (350ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query.trim());
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  // Load initial discover titles (Popular & Latest from MangaFire)
   useEffect(() => {
     let isMounted = true;
-    async function loadInit() {
-      if (!isOnline) return;
+    async function loadDiscover() {
       try {
-        const userGenres = profile?.preferredGenres || [];
-        const recs = await apiGetRecommendations(userGenres);
+        const data = await apiGetDiscover();
         if (isMounted) {
-          setRecommendations(recs);
+          setPopular(data.popular || []);
+          setLatest(data.latest || []);
         }
       } catch (err) {
-        console.error('Error loading recommendations:', err);
+        console.warn('Could not load discover titles:', err);
       }
     }
-    loadInit();
+    loadDiscover();
     return () => {
       isMounted = false;
     };
-  }, [profile, isOnline]);
+  }, []);
 
-  // AbortController ref for in-flight search requests
-  const abortControllerRef = useRef<AbortController | null>(null);
+  // Perform Fast Search (Etapa A: Prévia Imediata)
+  const executeSearch = useCallback(async (searchQuery: string) => {
+    if (!searchQuery) {
+      setResults([]);
+      setSearchState('IDLE');
+      return;
+    }
 
-  // Search function
-  const handleSearch = useCallback(
-    async (overrideQuery?: string, overrideGenre?: string | null) => {
-      const q = overrideQuery !== undefined ? overrideQuery : query;
-      const genre = overrideGenre !== undefined ? overrideGenre : selectedGenre;
+    // Cancel any previous inflight search
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
-      if (!q.trim() && !genre) {
-        setResults([]);
-        setSearched(false);
-        return;
-      }
+    setSearchState('LOADING');
+    setErrorMessage(null);
 
-      // Cancel any ongoing search request
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
+    try {
+      const data = await apiSearchManga(searchQuery, 24, controller.signal);
 
-      setLoading(true);
-      setSearched(true);
-
-      try {
-        const langs = selectedLang === 'all' ? undefined : [selectedLang, 'en'];
-        const genres = genre ? [genre] : undefined;
-
-        const data = await apiSearchManga(
-          {
-            q: q.trim(),
-            genres,
-            lang: langs,
-            limit: 24,
-          },
-          controller.signal
-        );
-
-        if (!controller.signal.aborted) {
-          setResults(data.results || []);
-          setTotalCount(data.total || 0);
-        }
-      } catch (err: any) {
-        if (!controller.signal.aborted) {
-          console.error('Search query failed:', err);
-          setResults([]);
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
-      }
-    },
-    [query, selectedGenre, selectedLang]
-  );
-
-  // Debounced search when typing
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (query.trim() || selectedGenre) {
-        handleSearch();
+      if (data.results && data.results.length > 0) {
+        setResults(data.results);
+        setSearchState('SUCCESS');
       } else {
         setResults([]);
-        setSearched(false);
+        setSearchState('EMPTY');
       }
-    }, 400);
+    } catch (err: any) {
+      if (err.name === 'CanceledError' || err.name === 'AbortError') {
+        return;
+      }
+      setErrorMessage('Não foi possível carregar os resultados da busca.');
+      setSearchState('ERROR');
+    }
+  }, []);
 
-    return () => clearTimeout(timer);
-  }, [query, selectedGenre, selectedLang, handleSearch]);
+  // Trigger search when debouncedQuery changes
+  useEffect(() => {
+    if (debouncedQuery) {
+      executeSearch(debouncedQuery);
+    } else {
+      setResults([]);
+      setSearchState('IDLE');
+    }
+  }, [debouncedQuery, executeSearch]);
+
+  const handleRetry = () => {
+    if (debouncedQuery) {
+      executeSearch(debouncedQuery);
+    }
+  };
 
   return (
-    <div id="discover-view-container" className="max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-24 md:pb-12 space-y-6 animate-in fade-in duration-150">
-      {/* Title & Description */}
-      <div className="space-y-1">
-        <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-red-500" />
-          Descobrir & Pesquisar
-        </h2>
-        <p className="text-xs text-neutral-400">
-          Prioridade MangaFire com fallback automático para MangaDex e extensões conectadas
-        </p>
-      </div>
+    <div id="discover-view-root" className="space-y-6 max-w-7xl mx-auto pb-12 animate-in fade-in duration-150">
+      {/* Search Header Banner */}
+      <div className="bg-gradient-to-br from-neutral-900 via-neutral-900 to-neutral-950 border border-neutral-800 rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
+        <div className="relative z-10 max-w-2xl">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold uppercase tracking-wider mb-3">
+            <Flame className="w-3.5 h-3.5" />
+            MangaFire Integrado
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+            Descobrir Mangás & Webtoons
+          </h1>
+          <p className="text-sm text-neutral-400 mt-1 mb-5">
+            Busca instantânea em duas etapas com prévia de capa e catálogo de capítulos atualizados.
+          </p>
 
-      {/* Search Input and Filters Bar */}
-      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 space-y-3.5 shadow-md">
-        <div className="flex flex-col sm:flex-row gap-3">
-          {/* Text Input */}
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400" />
+          {/* Search Input Box */}
+          <div className="relative flex items-center">
+            <Search className="w-5 h-5 absolute left-4 text-neutral-400 pointer-events-none" />
             <input
-              id="discover-search-input"
+              id="manga-search-input"
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Digite o nome do mangá (ex: Solo Leveling, Naruto, Berserk, One Piece)..."
-              className="w-full pl-10 pr-4 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-rose-500 transition"
+              placeholder="Digite o título (ex: Jajapotecai, Diário de Anne Frank, Solo Leveling)..."
+              className="w-full pl-12 pr-10 py-3.5 bg-neutral-950 border border-neutral-700/80 rounded-2xl text-white placeholder-neutral-500 focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 text-sm shadow-inner transition"
             />
-            {loading && (
-              <RefreshCw className="w-4 h-4 absolute right-3.5 top-1/2 -translate-y-1/2 text-rose-400 animate-spin" />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                className="absolute right-4 text-xs font-bold text-neutral-400 hover:text-white px-1.5 py-0.5 rounded-full bg-neutral-800 transition"
+              >
+                ✕
+              </button>
             )}
           </div>
 
-          {/* Language Selector */}
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-neutral-400 font-medium whitespace-nowrap">Idioma:</label>
-            <select
-              id="discover-lang-select"
-              value={selectedLang}
-              onChange={(e) => setSelectedLang(e.target.value)}
-              className="px-3 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-200 focus:outline-none focus:border-rose-500 cursor-pointer"
-            >
-              <option value="pt-br">🇧🇷 Português (PT-BR)</option>
-              <option value="en">🇺🇸 English</option>
-              <option value="es">🇪🇸 Español</option>
-              <option value="all">🌐 Todos os Idiomas</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Genre Filter Pills */}
-        <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
-          <button
-            type="button"
-            onClick={() => { setSelectedGenre(null); }}
-            className={`px-3 py-1.5 rounded-lg whitespace-nowrap font-medium transition cursor-pointer ${
-              selectedGenre === null
-                ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
-                : 'bg-neutral-950 text-neutral-400 border border-neutral-800 hover:text-neutral-200'
-            }`}
-          >
-            Todos os Gêneros
-          </button>
-          {GENRES_LIST.map((g) => {
-            const isSelected = selectedGenre === g;
-            return (
+          {/* Autocomplete Quick Suggestions */}
+          <div className="flex flex-wrap items-center gap-2 mt-3 text-xs text-neutral-400">
+            <span className="font-semibold text-neutral-300">Sugestões rápidas:</span>
+            {['Jajapotecai', 'Solo Leveling', 'One Piece', 'Jujutsu Kaisen', 'Chainsaw Man'].map((sug) => (
               <button
-                key={g}
+                key={sug}
                 type="button"
-                onClick={() => setSelectedGenre(isSelected ? null : g)}
-                className={`px-3 py-1.5 rounded-lg whitespace-nowrap font-medium transition cursor-pointer ${
-                  isSelected
-                    ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
-                    : 'bg-neutral-950 text-neutral-400 border border-neutral-800 hover:text-neutral-200'
-                }`}
+                onClick={() => setQuery(sug)}
+                className="px-2.5 py-1 rounded-lg bg-neutral-950/70 border border-neutral-800 hover:border-rose-500/50 hover:text-rose-300 transition cursor-pointer"
               >
-                {g}
+                {sug}
               </button>
-            );
-          })}
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* SEARCH RESULTS */}
-      {searched ? (
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-              Resultados da Pesquisa
-              {totalCount > 0 && (
-                <span className="text-xs font-normal text-neutral-400">
-                  ({totalCount} encontrados)
-                </span>
-              )}
+      {/* ========================================================================= */}
+      {/* 4 EXPLICIT STATES: LOADING / SUCCESS / EMPTY / ERROR / IDLE (Discover)     */}
+      {/* ========================================================================= */}
+
+      {/* 1. STATE: LOADING (Instant Preview Feedback) */}
+      {searchState === 'LOADING' && (
+        <div id="search-loading-state" className="p-8 bg-neutral-900 border border-neutral-800 rounded-2xl text-center space-y-4">
+          <div className="w-12 h-12 border-4 border-rose-500/20 border-t-rose-500 rounded-full animate-spin mx-auto" />
+          <div>
+            <h3 className="text-base font-bold text-white flex items-center justify-center gap-2">
+              🔎 Pesquisando <span className="text-rose-400">"{debouncedQuery}"</span>...
             </h3>
+            <p className="text-xs text-neutral-400 mt-1">
+              Etapa A: Obtendo prévia e metadados no MangaFire...
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* 2. STATE: ERROR (With Retry Button - No White Screen) */}
+      {searchState === 'ERROR' && (
+        <div id="search-error-state" className="p-8 bg-neutral-900 border border-rose-900/40 rounded-2xl text-center space-y-4">
+          <div className="w-12 h-12 rounded-full bg-rose-950/80 border border-rose-800 flex items-center justify-center mx-auto text-rose-400">
+            <AlertCircle className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-white">
+              😵 {errorMessage || 'Não foi possível carregar os resultados.'}
+            </h3>
+            <p className="text-xs text-neutral-400 mt-1">
+              Verifique sua conexão ou tente novamente.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleRetry}
+            className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-xl text-xs transition inline-flex items-center gap-2 cursor-pointer shadow-lg shadow-rose-950/50"
+          >
+            <RefreshCw className="w-4 h-4" /> Tentar novamente
+          </button>
+        </div>
+      )}
+
+      {/* 3. STATE: EMPTY (No Results) */}
+      {searchState === 'EMPTY' && (
+        <div id="search-empty-state" className="p-8 bg-neutral-900 border border-neutral-800 rounded-2xl text-center space-y-3">
+          <BookOpen className="w-10 h-10 text-neutral-500 mx-auto" />
+          <h3 className="text-base font-bold text-white">Nenhum mangá encontrado para "{debouncedQuery}"</h3>
+          <p className="text-xs text-neutral-400 max-w-md mx-auto">
+            Tente pesquisar por outros termos, nomes alternativos em inglês/japonês ou selecione uma das sugestões rápidas acima.
+          </p>
+        </div>
+      )}
+
+      {/* 4. STATE: SUCCESS (Results Grid) */}
+      {searchState === 'SUCCESS' && results.length > 0 && (
+        <div id="search-results-section" className="space-y-4 animate-in fade-in duration-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-rose-500" />
+              Resultados para <span className="text-rose-400">"{debouncedQuery}"</span>
+              <span className="text-xs font-semibold text-neutral-400 px-2 py-0.5 rounded-full bg-neutral-800">
+                {results.length} encontrados
+              </span>
+            </h2>
           </div>
 
-          {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4 animate-pulse">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((i) => (
-                <div key={i} className="aspect-[3/4] bg-neutral-900 rounded-2xl border border-neutral-800" />
-              ))}
-            </div>
-          ) : results.length === 0 ? (
-            /* Real Empty Search Result */
-            <div id="search-empty-results" className="text-center py-16 px-4 bg-neutral-900/30 border border-neutral-800/60 rounded-3xl space-y-3 max-w-md mx-auto">
-              <AlertCircle className="w-10 h-10 text-neutral-500 mx-auto" />
-              <h4 className="text-base font-bold text-white">Nenhum resultado encontrado</h4>
-              <p className="text-xs text-neutral-400">
-                Não encontramos mangás para os termos pesquisados. Tente mudar o idioma ou ajustar o nome.
-              </p>
-            </div>
-          ) : (
-            <div id="search-results-grid" className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
-              {results.map((item) => (
-                <div
-                  key={item.id}
-                  id={`search-card-${item.id}`}
-                  onClick={() => onSelectManga(item.id, item)}
-                  className="group relative bg-neutral-900 border border-neutral-800/80 hover:border-rose-500/50 rounded-2xl overflow-hidden cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl hover:shadow-rose-950/20 flex flex-col"
-                >
-                  <div className="aspect-[3/4] w-full relative bg-neutral-950 overflow-hidden">
-                    {item.coverUrl ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            {results.map((item) => (
+              <div
+                key={item.id}
+                id={`manga-card-${item.id}`}
+                onClick={() =>
+                  onSelectManga(item.id, {
+                    id: item.id,
+                    sourceId: 'mangafire',
+                    sourceName: 'MangaFire',
+                    title: item.title,
+                    description: item.description,
+                    coverUrl: item.coverUrl,
+                    author: '',
+                    artist: '',
+                    status: 'ongoing',
+                    genres: item.genres || [],
+                    totalChapters: item.totalChapters,
+                  })
+                }
+                className="group relative bg-neutral-900 border border-neutral-800 hover:border-rose-500/60 rounded-2xl overflow-hidden cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl hover:shadow-rose-950/20 flex flex-col"
+              >
+                {/* Cover Image */}
+                <div className="aspect-[3/4] bg-neutral-950 relative overflow-hidden">
+                  <img
+                    src={getProxiedImageUrl(item.coverUrl)}
+                    alt={item.title}
+                    referrerPolicy="no-referrer"
+                    loading="lazy"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src =
+                        'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=500&q=80';
+                    }}
+                  />
+                  {/* MangaFire Source Badge */}
+                  <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-rose-600/90 backdrop-blur-sm text-white text-[10px] font-extrabold uppercase shadow-sm">
+                    MangaFire
+                  </div>
+
+                  {item.totalChapters ? (
+                    <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-neutral-900/90 backdrop-blur-sm text-amber-400 text-[10px] font-bold border border-amber-500/30 shadow-sm">
+                      {item.totalChapters} caps
+                    </div>
+                  ) : null}
+                </div>
+
+                {/* Details */}
+                <div className="p-3 flex-1 flex flex-col justify-between">
+                  <h3 className="text-xs font-bold text-white line-clamp-2 group-hover:text-rose-400 transition">
+                    {item.title}
+                  </h3>
+                  <div className="mt-2 flex items-center justify-between text-[11px] text-neutral-400">
+                    <span className="truncate">{item.type || 'Manga'}</span>
+                    <span className="text-rose-400 text-[10px] font-semibold">Ver capítulos →</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 5. DEFAULT IDLE STATE: TRENDING & POPULAR CATALOG ON MANGAFIRE            */}
+      {/* ========================================================================= */}
+      {searchState === 'IDLE' && (
+        <div className="space-y-8">
+          {/* Popular Section */}
+          {popular.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Flame className="w-5 h-5 text-rose-500" />
+                  Destaques Populares MangaFire
+                </h2>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {popular.map((item) => (
+                  <div
+                    key={item.id}
+                    id={`popular-card-${item.id}`}
+                    onClick={() => onSelectManga(item.id, item)}
+                    className="group bg-neutral-900 border border-neutral-800 hover:border-rose-500/60 rounded-2xl overflow-hidden cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl flex flex-col"
+                  >
+                    <div className="aspect-[3/4] bg-neutral-950 relative overflow-hidden">
                       <img
                         src={getProxiedImageUrl(item.coverUrl)}
                         alt={item.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         referrerPolicy="no-referrer"
                         loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).src =
+                            'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=500&q=80';
+                        }}
                       />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-neutral-600">
-                        <BookOpen className="w-8 h-8" />
+                      <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-rose-600/90 backdrop-blur-sm text-white text-[10px] font-extrabold uppercase">
+                        MangaFire
                       </div>
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-transparent to-black/20" />
-                    {item.status && (
-                      <div className="absolute top-2 right-2">
-                        <span className="px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-sm border border-neutral-700/60 text-[9px] font-medium text-neutral-300">
-                          {item.status === 'completed' ? 'Completo' : 'Em andamento'}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="p-2.5 sm:p-3 flex-1 flex flex-col justify-between">
-                    <div>
-                      <h4 className="text-xs sm:text-sm font-bold text-white line-clamp-2 leading-tight group-hover:text-rose-400 transition">
+                    </div>
+                    <div className="p-3 flex-1 flex flex-col justify-between">
+                      <h3 className="text-xs font-bold text-white line-clamp-2 group-hover:text-rose-400 transition">
                         {item.title}
-                      </h4>
-                      {item.author && (
-                        <p className="text-[11px] text-neutral-400 mt-1 line-clamp-1">
-                          {item.author}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="mt-2 pt-2 border-t border-neutral-800/60 flex items-center justify-between text-[10px] text-neutral-400">
-                      <div className="flex items-center gap-1.5 truncate max-w-[110px]">
-                        <span className="truncate">
-                          {item.genres?.[0] || 'Mangá'}
-                        </span>
-                        {item.sources && item.sources.length > 1 && (
-                          <span className="px-1 py-0.2 rounded bg-rose-950/70 border border-rose-800/60 text-[9px] text-rose-300 font-semibold shrink-0">
-                            {item.sources.length} fontes
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-rose-400 font-medium">Ver capítulos &rarr;</span>
+                      </h3>
+                      <div className="mt-2 text-[10px] text-neutral-400">Explorar obra →</div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
-        </section>
-      ) : (
-        /* RECOMMENDATIONS SECTION */
-        <section className="space-y-4 pt-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-rose-500" />
-              Recomendações e Populares
-            </h3>
-          </div>
 
-          {recommendations.length === 0 ? (
-            <div className="text-center py-12 bg-neutral-900/20 rounded-2xl border border-neutral-800/60 text-neutral-400 text-xs">
-              Carregando títulos recomendados da fonte...
-            </div>
-          ) : (
-            <div id="recommendations-grid" className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
-              {recommendations.map((item) => (
-                <div
-                  key={item.id}
-                  id={`rec-card-${item.id}`}
-                  onClick={() => onSelectManga(item.id, item)}
-                  className="group relative bg-neutral-900 border border-neutral-800/80 hover:border-rose-500/50 rounded-2xl overflow-hidden cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl hover:shadow-rose-950/20 flex flex-col"
-                >
-                  <div className="aspect-[3/4] w-full relative bg-neutral-950 overflow-hidden">
-                    {item.coverUrl ? (
+          {/* Latest Updates Section */}
+          {latest.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-amber-500" />
+                  Recém Atualizados
+                </h2>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {latest.map((item) => (
+                  <div
+                    key={item.id}
+                    id={`latest-card-${item.id}`}
+                    onClick={() => onSelectManga(item.id, item)}
+                    className="group bg-neutral-900 border border-neutral-800 hover:border-rose-500/60 rounded-2xl overflow-hidden cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl flex flex-col"
+                  >
+                    <div className="aspect-[3/4] bg-neutral-950 relative overflow-hidden">
                       <img
                         src={getProxiedImageUrl(item.coverUrl)}
                         alt={item.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         referrerPolicy="no-referrer"
                         loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).src =
+                            'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=500&q=80';
+                        }}
                       />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-neutral-600">
-                        <BookOpen className="w-8 h-8" />
+                      <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-rose-600/90 backdrop-blur-sm text-white text-[10px] font-extrabold uppercase">
+                        MangaFire
                       </div>
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-transparent to-black/20" />
-                  </div>
-
-                  <div className="p-2.5 sm:p-3 flex-1 flex flex-col justify-between">
-                    <div>
-                      <h4 className="text-xs sm:text-sm font-bold text-white line-clamp-2 leading-tight group-hover:text-rose-400 transition">
+                    </div>
+                    <div className="p-3 flex-1 flex flex-col justify-between">
+                      <h3 className="text-xs font-bold text-white line-clamp-2 group-hover:text-rose-400 transition">
                         {item.title}
-                      </h4>
-                      {item.genres && item.genres.length > 0 && (
-                        <p className="text-[10px] text-neutral-400 mt-1 line-clamp-1">
-                          {item.genres.slice(0, 2).join(' • ')}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="mt-2 pt-2 border-t border-neutral-800/60 flex items-center justify-between text-[10px] text-neutral-400">
-                      <span>MangaDex</span>
-                      <span className="text-rose-400 font-medium">Detalhes &rarr;</span>
+                      </h3>
+                      <div className="mt-2 text-[10px] text-neutral-400">Ler agora →</div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
-        </section>
+        </div>
       )}
     </div>
   );

@@ -1,0 +1,318 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile record in Firestore",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "User's display name or username",
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User's email address",
+          "maxLength": 200
+        },
+        "avatar": {
+          "type": "string",
+          "description": "Avatar URL or preset identifier",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of account creation"
+        },
+        "lastLoginAt": {
+          "type": "string",
+          "description": "ISO timestamp of last login"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "admin"],
+          "description": "User account role"
+        }
+      },
+      "required": ["name", "email", "createdAt"]
+    },
+    "Favorite": {
+      "title": "Favorite",
+      "description": "User's saved favorite manga",
+      "type": "object",
+      "properties": {
+        "mangaId": {
+          "type": "string",
+          "description": "Unique identifier of the manga",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the manga",
+          "maxLength": 300
+        },
+        "cover": {
+          "type": "string",
+          "description": "Cover image URL",
+          "maxLength": 1000
+        },
+        "addedAt": {
+          "type": "string",
+          "description": "ISO timestamp when favorited"
+        }
+      },
+      "required": ["mangaId", "title", "addedAt"]
+    },
+    "HistoryItem": {
+      "title": "HistoryItem",
+      "description": "Record of a manga chapter read by the user",
+      "type": "object",
+      "properties": {
+        "mangaId": {
+          "type": "string",
+          "description": "Unique identifier of the manga",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the manga",
+          "maxLength": 300
+        },
+        "chapterId": {
+          "type": "string",
+          "description": "Unique identifier of the chapter",
+          "maxLength": 128
+        },
+        "chapterNumber": {
+          "type": "string",
+          "description": "Number of the chapter read",
+          "maxLength": 50
+        },
+        "lastReadAt": {
+          "type": "string",
+          "description": "ISO timestamp of reading"
+        }
+      },
+      "required": ["mangaId", "title", "chapterId", "chapterNumber", "lastReadAt"]
+    },
+    "ReadingProgress": {
+      "title": "ReadingProgress",
+      "description": "Current reading progress per manga",
+      "type": "object",
+      "properties": {
+        "mangaId": {
+          "type": "string",
+          "description": "Unique identifier of the manga",
+          "maxLength": 128
+        },
+        "chapterId": {
+          "type": "string",
+          "description": "Unique identifier of current chapter",
+          "maxLength": 128
+        },
+        "chapterNumber": {
+          "type": "string",
+          "description": "Current chapter number",
+          "maxLength": 50
+        },
+        "progress": {
+          "type": "number",
+          "description": "Percentage progress 0-100"
+        },
+        "currentPage": {
+          "type": "number",
+          "description": "Current page number"
+        },
+        "totalPages": {
+          "type": "number",
+          "description": "Total pages in chapter"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last update"
+        }
+      },
+      "required": ["mangaId", "chapterId", "chapterNumber", "progress", "updatedAt"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User preferences and reader settings",
+      "type": "object",
+      "properties": {
+        "theme": {
+          "type": "string",
+          "description": "UI theme (dark, black, etc.)",
+          "maxLength": 50
+        },
+        "reader_mode": {
+          "type": "string",
+          "enum": ["webtoon", "single", "double"],
+          "description": "Reader display mode"
+        },
+        "reading_direction": {
+          "type": "string",
+          "enum": ["ltr", "rtl", "vertical"],
+          "description": "Reading direction"
+        },
+        "preferredGenres": {
+          "type": "array",
+          "description": "List of user preferred genre names"
+        },
+        "preferredLanguages": {
+          "type": "array",
+          "description": "List of preferred language codes"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of update"
+        }
+      }
+    },
+    "Manga": {
+      "title": "Manga",
+      "description": "Global manga metadata cache",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique ID of the manga",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Main title",
+          "maxLength": 300
+        },
+        "alternativeTitles": {
+          "type": "array",
+          "description": "Alternative titles and aliases"
+        },
+        "description": {
+          "type": "string",
+          "description": "Synopsis",
+          "maxLength": 4000
+        },
+        "cover": {
+          "type": "string",
+          "description": "Cover URL",
+          "maxLength": 1000
+        },
+        "author": {
+          "type": "string",
+          "description": "Author name",
+          "maxLength": 200
+        },
+        "artist": {
+          "type": "string",
+          "description": "Artist name",
+          "maxLength": 200
+        },
+        "genres": {
+          "type": "array",
+          "description": "Array of genre tags"
+        },
+        "status": {
+          "type": "string",
+          "description": "Publishing status",
+          "maxLength": 50
+        },
+        "type": {
+          "type": "string",
+          "description": "Manga, Manhwa, Manhua, etc.",
+          "maxLength": 50
+        },
+        "source": {
+          "type": "string",
+          "description": "Source name (e.g. MangaFire)",
+          "maxLength": 50
+        },
+        "sourceId": {
+          "type": "string",
+          "description": "Source slug or identifier",
+          "maxLength": 200
+        },
+        "totalChapters": {
+          "type": "number",
+          "description": "Known chapter count"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last metadata refresh"
+        }
+      },
+      "required": ["id", "title", "source"]
+    },
+    "Chapter": {
+      "title": "Chapter",
+      "description": "Metadata for a single chapter",
+      "type": "object",
+      "properties": {
+        "chapterNumber": {
+          "type": "string",
+          "description": "Chapter number (e.g. 1, 87.5)",
+          "maxLength": 50
+        },
+        "title": {
+          "type": "string",
+          "description": "Chapter title",
+          "maxLength": 300
+        },
+        "source": {
+          "type": "string",
+          "description": "Source name",
+          "maxLength": 50
+        },
+        "sourceChapterId": {
+          "type": "string",
+          "description": "Source chapter ID or slug",
+          "maxLength": 200
+        },
+        "url": {
+          "type": "string",
+          "description": "Source URL reference",
+          "maxLength": 1000
+        },
+        "pages": {
+          "type": "number",
+          "description": "Number of pages"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of update"
+        }
+      },
+      "required": ["chapterNumber", "source"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profile document"
+    },
+    "/users/{uid}/favorites/{mangaId}": {
+      "schema": "Favorite",
+      "description": "Manga favorited by user"
+    },
+    "/users/{uid}/history/{historyId}": {
+      "schema": "HistoryItem",
+      "description": "History item for reading history"
+    },
+    "/users/{uid}/progress/{mangaId}": {
+      "schema": "ReadingProgress",
+      "description": "Reading progress for a specific manga"
+    },
+    "/users/{uid}/settings/preferences": {
+      "schema": "UserSettings",
+      "description": "User preferences and reader settings"
+    },
+    "/mangas/{mangaId}": {
+      "schema": "Manga",
+      "description": "Cached manga metadata"
+    },
+    "/mangas/{mangaId}/chapters/{chapterId}": {
+      "schema": "Chapter",
+      "description": "Cached chapter metadata"
+    }
+  }
+}
